@@ -1,0 +1,17 @@
+services:
+  maxbot:
+    build: .
+    env_file:
+      - .env
+    environment:
+      DRY_RUN: "false"
+      SEND_PHOTOS: "true"
+      CROPWISE_FIELD_IDS: ""
+      STATE_DB: /data/maxbot.sqlite
+    volumes:
+      - maxbot_data:/data
+    command: ["-mode", "poll"]
+    restart: unless-stopped
+
+volumes:
+  maxbot_data:

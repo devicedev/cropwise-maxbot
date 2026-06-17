@@ -1,0 +1,23 @@
+.env
+state.json
+data/
+certs/
+*.sqlite
+*.sqlite-*
+
+# Build and test artifacts
+maxbot
+maxbot.exe
+*.exe
+*.test
+*.go.*
+.gotmp/
+.gocache/
+.gomodcache/
+
+# Local editor and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
