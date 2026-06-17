@@ -399,26 +399,105 @@ func leadingGrowthStageCode(s string) string {
 }
 
 func formatIssueLine(issue map[string]any) string {
-	name := stringValue(issue, "plant_threat_name", "threat_name", "name", "title")
-	if name == "" {
-		if threat, ok := issue["plant_threat"].(map[string]any); ok {
-			name = stringValue(threat, "name", "title", "description")
-		}
-	}
+	name := issueDisplayName(issue)
 	parts := []string{}
-	if name != "" {
-		parts = append(parts, name)
-	}
 	if level := translateThreatLevel(stringValue(issue, "threat_level")); level != "" {
 		parts = append(parts, level)
 	}
-	if amount := numberStringAny(issue, "amount", "damaged_area", "number_pests_in_trap"); amount != "" {
+	if amount := issueAmountText(issue); amount != "" {
 		parts = append(parts, amount)
 	}
 	if desc := cleanText(stringValue(issue, "additional_info", "description")); desc != "" {
 		parts = append(parts, trimForLog(desc, 160))
 	}
-	return strings.Join(parts, ": ")
+	if name == "" {
+		return strings.Join(parts, ": ")
+	}
+	if len(parts) == 0 {
+		return name
+	}
+	return name + ": " + strings.Join(parts, "; ")
+}
+
+func issueDisplayName(issue map[string]any) string {
+	name := stringValue(issue, "plant_threat_name", "threat_name", "name", "title")
+	threatType := translateThreatType(stringValue(issue, "threat_type"))
+	latinName := stringValue(issue, "latin_name")
+	if threat, ok := issue["plant_threat"].(map[string]any); ok {
+		if name == "" {
+			name = stringValue(threat, "name", "custom_name", "standard_name", "title", "description")
+		}
+		if threatType == "" {
+			threatType = translateThreatType(stringValue(threat, "threat_type"))
+		}
+		if latinName == "" {
+			latinName = stringValue(threat, "latin_name")
+		}
+	}
+	details := make([]string, 0, 2)
+	if threatType != "" {
+		details = append(details, threatType)
+	}
+	if latinName != "" {
+		details = append(details, latinName)
+	}
+	if len(details) == 0 {
+		return name
+	}
+	if name == "" {
+		return strings.Join(details, " / ")
+	}
+	return fmt.Sprintf("%s (%s)", name, strings.Join(details, " / "))
+}
+
+func issueAmountText(issue map[string]any) string {
+	for _, key := range []string{"amount", "damaged_area", "number_pests_in_trap"} {
+		if amount := stringValue(issue, key); amount != "" {
+			if label := translateIssueAmountKey(key); label != "" {
+				return label + " " + amount
+			}
+			return amount
+		}
+	}
+	return ""
+}
+
+func translateIssueAmountKey(key string) string {
+	switch normalizeKey(key) {
+	case "amount", "quantity", "count":
+		return "количество"
+	case "damaged_area":
+		return "площадь повреждения"
+	case "number_pests_in_trap":
+		return "количество в ловушке"
+	default:
+		return ""
+	}
+}
+
+func translateThreatType(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "weed", "weeds":
+		return "Сорняк"
+	case "insect", "insects":
+		return "Насекомое"
+	case "disease", "diseases":
+		return "Болезнь"
+	case "nematode", "nematodes":
+		return "Нематоды"
+	case "nutrition_problem":
+		return "Проблема питания"
+	case "damaged_area":
+		return "Повреждение"
+	case "technological_mistake":
+		return "Технологическая ошибка"
+	case "pest", "pests":
+		return "Вредитель"
+	case "other":
+		return "Прочее"
+	default:
+		return raw
+	}
 }
 
 func translateThreatLevel(raw string) string {
@@ -1049,40 +1128,6 @@ func formatDateOnly(raw string) string {
 	return raw
 }
 
-func formatFieldCondition(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "bad":
-		return "🔴 Плохое ★☆☆☆☆"
-	case "satisfactory":
-		return "🟡 Удовлетворительное ★★★☆☆"
-	case "good":
-		return "🟢 Хорошее ★★★★☆"
-	case "excellent":
-		return "🟢 Отличное ★★★★★"
-	case "":
-		return ""
-	default:
-		return raw
-	}
-}
-
-func formatYieldRisk(v any) string {
-	if v == nil {
-		return ""
-	}
-	if isTruthy(v) {
-		return "🚨 есть риск снижения урожайности"
-	}
-	if isFalsey(v) {
-		return "✅ риск снижения урожайности не отмечен"
-	}
-	raw := strings.TrimSpace(anyToString(v))
-	if raw == "" || raw == "<nil>" {
-		return ""
-	}
-	return raw
-}
-
 func isTruthy(v any) bool {
 	switch t := v.(type) {
 	case bool:
@@ -1096,24 +1141,6 @@ func isTruthy(v any) bool {
 		return t != 0
 	case int64:
 		return t != 0
-	default:
-		return false
-	}
-}
-
-func isFalsey(v any) bool {
-	switch t := v.(type) {
-	case bool:
-		return !t
-	case string:
-		s := strings.ToLower(strings.TrimSpace(t))
-		return s == "false" || s == "0" || s == "no" || s == "n"
-	case float64:
-		return t == 0
-	case int:
-		return t == 0
-	case int64:
-		return t == 0
 	default:
 		return false
 	}
@@ -1208,10 +1235,6 @@ func stringValue(m map[string]any, keys ...string) string {
 	return ""
 }
 
-func numberString(m map[string]any, key string) string {
-	return numberStringAny(m, key)
-}
-
 func numberStringAny(m map[string]any, keys ...string) string {
 	for _, key := range keys {
 		v, ok := m[key]
@@ -1260,43 +1283,6 @@ func anyToString(v any) string {
 	}
 }
 
-func summarizeNested(r CropwiseReport, keys []string, max int) []string {
-	var out []string
-	for _, key := range keys {
-		v, ok := r[key]
-		if !ok || v == nil {
-			continue
-		}
-		out = append(out, summarizeValue(v, max-len(out))...)
-		if len(out) >= max {
-			break
-		}
-	}
-	return out
-}
-
-func summarizeMeasurements(r CropwiseReport, max int) []string {
-	var out []string
-	for _, key := range []string{"measurements", "scout_report_point_measurements"} {
-		v, ok := r[key]
-		if !ok || v == nil {
-			continue
-		}
-		items := toAnySlice(v)
-		for _, item := range items {
-			if m, ok := item.(map[string]any); ok {
-				out = append(out, summarizeMeasurementMap(m))
-			} else {
-				out = append(out, summarizeValue(item, 1)...)
-			}
-			if len(out) >= max {
-				return out
-			}
-		}
-	}
-	return out
-}
-
 func toAnySlice(v any) []any {
 	switch t := v.(type) {
 	case []any:
@@ -1310,41 +1296,6 @@ func toAnySlice(v any) []any {
 	default:
 		return []any{v}
 	}
-}
-
-func summarizeMeasurementMap(m map[string]any) string {
-	title := stringValue(m, "measurement_type_name", "human_name", "name", "measurement_type", "system_name")
-	if title == "" {
-		title = "Измерение"
-	}
-	parts := []string{title}
-	if calc := numberStringAny(m, "calculated_value", "value"); calc != "" {
-		parts = append(parts, "расчетное значение: "+calc)
-	}
-	if vals, ok := m["measurement_values"].(map[string]any); ok {
-		for _, key := range sortedKeys(vals) {
-			val := strings.TrimSpace(anyToString(vals[key]))
-			if val == "" || val == "<nil>" {
-				continue
-			}
-			parts = append(parts, fmt.Sprintf("%s: %s", translateMeasurementKey(key), val))
-		}
-	} else {
-		for _, key := range []string{
-			"density_of_planting_linear_length_of_row",
-			"density_of_planting_linear_plants_in_rows",
-			"density_of_planting_linear_rows_count",
-			"density_of_planting_linear_row_width",
-		} {
-			if val := numberStringAny(m, key); val != "" {
-				parts = append(parts, fmt.Sprintf("%s: %s", translateMeasurementKey(key), val))
-			}
-		}
-	}
-	if desc := stringValue(m, "description", "additional_info"); desc != "" {
-		parts = append(parts, "описание: "+trimForLog(desc, 120))
-	}
-	return strings.Join(parts, "; ")
 }
 
 func sortedKeys(m map[string]any) []string {
@@ -1398,65 +1349,7 @@ func translateMeasurementKey(key string) string {
 	}
 }
 
-func summarizeValue(v any, max int) []string {
-	if max <= 0 {
-		return nil
-	}
-	var out []string
-	switch t := v.(type) {
-	case []any:
-		for _, item := range t {
-			out = append(out, summarizeValue(item, 1)...)
-			if len(out) >= max {
-				break
-			}
-		}
-	case map[string]any:
-		out = append(out, summarizeMap(t))
-	case string:
-		if strings.TrimSpace(t) != "" {
-			out = append(out, strings.TrimSpace(t))
-		}
-	}
-	return out
-}
-
-func summarizeMap(m map[string]any) string {
-	preferred := []string{"measurement_type_name", "human_name", "name", "title", "type", "measurement_type", "threat_type", "disease", "weed", "pest", "value", "calculated_value", "measurement_values", "severity", "comment", "additional_info"}
-	parts := make([]string, 0)
-	for _, k := range preferred {
-		if v, ok := m[k]; ok {
-			s := strings.TrimSpace(anyToString(v))
-			if s != "" && s != "{}" && s != "[]" {
-				parts = append(parts, fmt.Sprintf("%s: %s", k, trimForLog(s, 120)))
-			}
-		}
-	}
-	if len(parts) > 0 {
-		return strings.Join(parts, "; ")
-	}
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		if len(parts) >= 3 {
-			break
-		}
-		s := strings.TrimSpace(anyToString(m[k]))
-		if s != "" && s != "{}" && s != "[]" {
-			parts = append(parts, fmt.Sprintf("%s: %s", k, trimForLog(s, 120)))
-		}
-	}
-	return strings.Join(parts, "; ")
-}
-
 var imageExtRe = regexp.MustCompile(`(?i)\.(jpg|jpeg|png|gif|webp|bmp|tiff|heic)(\?|$)`)
-
-func ExtractImageURLs(r CropwiseReport, limit int) []string {
-	return ExtractImageURLsWithBase(r, limit, "https://operations.cropwise.com")
-}
 
 func ExtractImageURLsWithBase(r CropwiseReport, limit int, baseURL string) []string {
 	seen := make(map[string]bool)
@@ -1560,9 +1453,10 @@ func imageVariantGroupKey(rawURL string) string {
 }
 
 func isKnownImageVariantName(name string) bool {
-	return name == "photo.jpg" ||
+	return isCropioPhotoName(name) ||
 		name == "photo.jpeg" ||
 		name == "photo.png" ||
+		name == "photo.webp" ||
 		strings.HasPrefix(name, "preview_") ||
 		strings.HasPrefix(name, "thumb_")
 }
@@ -1578,6 +1472,8 @@ func imageQualityRank(rawURL string) int {
 		name = path[idx+1:]
 	}
 	switch {
+	case name == "photo":
+		return 11000
 	case strings.HasPrefix(name, "photo."):
 		return 10000
 	case strings.Contains(name, "preview_1000"):
@@ -1597,6 +1493,10 @@ func imageQualityRank(rawURL string) int {
 	default:
 		return 1000
 	}
+}
+
+func isCropioPhotoName(name string) bool {
+	return name == "photo" || strings.HasPrefix(name, "photo.")
 }
 
 func normalizeImageURL(raw string, baseURL string) string {
@@ -1633,12 +1533,12 @@ func cropioOriginalImageURL(rawURL string) string {
 	}
 	name := u.Path[idx+1:]
 	nameLower := strings.ToLower(name)
-	suffixIdx := strings.LastIndex(nameLower, "_photo.")
+	suffixIdx := strings.LastIndex(nameLower, "_photo")
 	if !strings.HasPrefix(nameLower, "preview_") || suffixIdx < 0 {
 		return rawURL
 	}
-	ext := name[suffixIdx+len("_photo"):]
-	u.Path = u.Path[:idx+1] + "photo" + ext
+	suffix := name[suffixIdx+len("_photo"):]
+	u.Path = u.Path[:idx+1] + "photo" + suffix
 	return u.String()
 }
 
